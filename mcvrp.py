@@ -1,16 +1,39 @@
+import sys
+import copy
+import time
+
 import networkx as nx
 import numpy as np
 
-# Define G as global
+def solve():
+    start_time = time.time()
+    init()
+
+    sol, cost = nearest_neighbour_alg()
+    print_sol(sol, cost)
+    if (not sol):
+        exit(-1)
+
+    new_cost = 0
+    i = 0
+    while (cost != new_cost):
+        i += 1
+        cost = new_cost
+        sol, new_cost = intraroute_swap(sol)
+        sol, new_cost = interroute_swap(sol)
+    end_time = time.time()
+    print_sol(sol, cost)
+    print('i:', i)
+    print("--- %s seconds ---" % (end_time - start_time))
+
 
 def init():
-    init_instance()
-    solve()
-
-
-def init_instance():
-    # placeholder
-    f = open("instances/Abdulkader/vrpnc13b.txt")
+    if (len(sys.argv) < 2):
+        print("Not enough parameters")
+        exit(1)
+    
+    file_name = sys.argv[1]
+    f = open("instances/Abdulkader/" + file_name)
 
     data = f.readline().strip().split()
     n = int(data[5])
@@ -51,7 +74,7 @@ def can_satisfy(capacity, demand):
 
 
 
-def solve():
+def nearest_neighbour_alg():
     # Nearest neighbour algorithm
     sol = []
     cost = 0
@@ -61,7 +84,7 @@ def solve():
         capacity = G.graph['capacity'].copy()
         time_limit = G.graph['max_time']
         path = [start_node]
-        nearest = nearest_neighbour(G, start_node, capacity, time_limit)
+        nearest = get_nearest_neighbour(G, start_node, capacity, time_limit)
         while nearest != -1:
             G.nodes[nearest]['visited'] = True
             cost += G[start_node][nearest]['cost']
@@ -71,7 +94,7 @@ def solve():
             capacity[0] -= G.nodes[nearest]['demand'][0]
             capacity[1] -= G.nodes[nearest]['demand'][1]
             start_node = nearest
-            nearest = nearest_neighbour(G, start_node, capacity, time_limit)
+            nearest = get_nearest_neighbour(G, start_node, capacity, time_limit)
             if nearest == -1:
                 path.append(0)
                 cost += G[start_node][0]['cost']
@@ -83,14 +106,12 @@ def solve():
     
     non_visited_nodes = [node for node in G.nodes() if not G.nodes[node]['visited']]
     if (len(non_visited_nodes) > 0):
-        print('No solution found')
-        return
+        return False
 
-    print('Paths:', sol)
-    print('Total cost:', cost)
+    return (sol, cost)
 
 
-def nearest_neighbour(G, start_node, capacity, time_limit):
+def get_nearest_neighbour(G, start_node, capacity, time_limit):
     neighbors = [
         (neighbour, G[start_node][neighbour]['cost'])
         for neighbour in G.neighbors(start_node)
@@ -107,4 +128,80 @@ def nearest_neighbour(G, start_node, capacity, time_limit):
     return neighbors[0][0]
 
 
-init()
+def get_path_cost(path):
+    cost = 0
+    for i in range(len(path) - 1):
+        cost += G[path[i]][path[i+1]]['cost']
+    return cost
+
+def get_neighbour_cost(path, i):
+    return G[path[i-1]][path[i]]['cost'] + G[path[i]][path[i+1]]['cost']
+
+
+def intraroute_swap(paths):
+
+    sol = []
+    for path in paths:
+        finished = False
+        while (not finished):
+            for i in range(1, len(path) - 1):
+                path_cost_i = get_neighbour_cost(path, i)
+                for j in range(i+1, len(path) - 1):
+                    path_cost = path_cost_i + get_neighbour_cost(path, j)
+                    swap_path = copy.deepcopy(path)
+                    swap_path[i], swap_path[j] = swap_path[j], swap_path[i]
+                    swap_cost = get_neighbour_cost(swap_path, i) + get_neighbour_cost(swap_path, j)
+                    if (swap_cost < path_cost):
+                        path = swap_path
+                        cost = swap_cost
+                        break
+                else:
+                    continue
+                break   # Break out of the nested loop as well
+            finished = True
+
+        sol.append(path)
+
+    cost = 0
+    for path in sol:
+        cost += get_path_cost(path)
+
+    return (sol, cost)
+
+
+def interroute_swap(paths):
+
+    def loop():
+        for n in range(len(paths) - 1):
+            for m in range(n + 1, len(paths)):
+                for i in range(1, len(paths[n]) - 1):
+                    for j in range(1, len(paths[m]) - 1):
+                        path_cost = get_neighbour_cost(paths[n], i) + get_neighbour_cost(paths[m], j)
+                        swap_path_n, swap_path_m = copy.deepcopy(paths[n]), copy.deepcopy(paths[m])
+                        swap_path_n[i], swap_path_m[j] = swap_path_m[j], swap_path_n[i]
+                        swap_cost = get_neighbour_cost(swap_path_n, i) + get_neighbour_cost(swap_path_m, j)
+                        if (swap_cost < path_cost):
+                            paths[n], paths[m] = swap_path_n, swap_path_m
+                            return True
+        return False
+    
+    while loop():
+        pass
+
+    cost = 0
+    for path in paths:
+        cost += get_path_cost(path)
+
+    return paths, cost 
+
+
+def print_sol(sol, cost):
+    if not sol:
+        print('No solution found')
+        return
+
+    print('Paths:', sol)
+    print('Total cost:', cost)
+
+
+solve()
