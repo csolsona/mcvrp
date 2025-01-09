@@ -56,6 +56,7 @@ def solve(G, k_max, n):
 
     return sol, cost
 
+
 # Variable neighborhood search (VNS)
 def vns(sol, cost, k_max, n):
 
@@ -103,7 +104,7 @@ def local_search(sol):
 
 
 def shake(sol, k):
-    print('k:', k)
+    # print('k:', k)
 
     def generate_indexes(sol, visited_nodes):
         indexes = []
@@ -220,6 +221,167 @@ def get_nearest_neighbour(G, start_node, capacity, time_limit):
     return neighbors[0][0]
 
 
+def intraroute_swap(paths):
+
+    def loop(path):
+        indexes = list(range(1, len(path) - 1))
+        random.shuffle(indexes)
+        for i, n in enumerate(indexes):
+            path_cost_n = get_neighbour_cost(path, n)
+            for m in indexes[i+1:]:
+                path_cost = path_cost_n + get_neighbour_cost(path, m)
+                path[n], path[m] = path[m], path[n]
+                swap_cost = get_neighbour_cost(path, n) + get_neighbour_cost(path, m)
+                if (swap_cost < path_cost):
+                    return path
+                else:
+                    path[n], path[m] = path[m], path[n]
+        
+        return False
+    
+    for path in paths:
+        while path:
+            path = loop(path)
+
+    cost = get_sol_cost(paths)
+
+    return (paths, cost)
+
+
+def intraroute_insertion(paths):
+    sol = []
+
+    def loop(path):
+        indexes = list(range(1, len(path) - 1))
+        random.shuffle(indexes)
+        path_cost = get_path_cost(path)
+        for n in indexes:
+            for m in indexes:
+                if n == m:
+                    continue
+                item = path.pop(n)
+                path.insert(m, item)
+                insertion_cost = get_path_cost(path)
+                if (insertion_cost < path_cost):
+                    return path
+                else:
+                    item = path.pop(m)
+                    path.insert(n, item)
+        
+        # sol.append(path)
+        return False
+    
+    for path in paths:
+        while path:
+            path = loop(path)
+
+    cost = get_sol_cost(paths)
+
+    return (paths, cost)
+
+
+def interroute_swap(paths):
+
+    def loop():
+        for x in range(len(paths) - 1):
+            indexes_x = list(range(1, len(paths[x]) - 1))
+            random.shuffle(indexes_x)
+            for y in range(x + 1, len(paths)):
+                indexes_y = list(range(1, len(paths[y]) - 1))
+                random.shuffle(indexes_y)
+                for n in indexes_x:
+                    path_cost_x = get_neighbour_cost(paths[x], n)
+                    for m in indexes_y:
+                        path_cost = path_cost_x + get_neighbour_cost(paths[y], m)
+                        paths[x][n], paths[y][m] = paths[y][m], paths[x][n]
+                        swap_cost = get_neighbour_cost(paths[x], n) + get_neighbour_cost(paths[y], m)
+                        if (swap_cost < path_cost and
+                            is_path_feasible(paths[x]) and is_path_feasible(paths[y])
+                            ):
+                            return True
+                        else:
+                            paths[x][n], paths[y][m] = paths[y][m], paths[x][n]
+
+        return False
+    
+    while loop():
+        pass
+
+    cost = get_sol_cost(paths)
+
+    return (paths, cost)
+
+
+def interroute_insertion(paths):
+
+    def loop():
+        for x in range(len(paths)):
+            path_cost_x = get_path_cost(paths[x])
+            indexes_x = list(range(1, len(paths[x]) - 1))
+            random.shuffle(indexes_x)
+            for y in range(len(paths)):
+                if x == y:
+                    continue
+                path_cost = path_cost_x + get_path_cost(paths[y])
+                indexes_y = list(range(1, len(paths[y]) - 1))
+                random.shuffle(indexes_y)
+                for n in indexes_x:
+                    for m in indexes_y:
+                        item = paths[x].pop(n)
+                        paths[y].insert(m, item)
+                        swap_cost = get_path_cost(paths[x]) + get_path_cost(paths[y])
+                        if (swap_cost < path_cost and
+                            is_path_feasible(paths[x]) and is_path_feasible(paths[y])
+                            ):
+                            return True
+                        else:
+                            item = paths[y].pop(m)
+                            paths[x].insert(n, item)
+        return False
+    
+    while loop():
+        pass
+
+    cost = get_sol_cost(paths)
+
+    return (paths, cost) 
+
+
+def two_opt_swap(paths):
+    sol = []
+
+    def loop(path):
+        indexes = list(range(1, len(path) - 1))
+        random.shuffle(indexes)
+        path_cost = get_path_cost(path)
+        for i in indexes:
+            for j in indexes:
+                if i == j:
+                    continue
+                x, y = i, j
+                if i > j:
+                    x, y = j, i
+                swap_path = (
+                    path[:x] +
+                    path[x:y][::-1] +
+                    path[y:]
+                )
+                swap_cost = get_path_cost(swap_path)
+                if (swap_cost < path_cost):
+                    return swap_path
+        
+        sol.append(path)
+        return False
+    
+    for path in paths:
+        while path:
+            path = loop(path)
+
+    cost = get_sol_cost(paths)
+
+    return (sol, cost)
+
+
 # Sum of nodes does not exceed the maximum capacity
 def is_path_feasible(path):
     return (
@@ -239,190 +401,6 @@ def get_path_cost(path):
 
 def get_neighbour_cost(path, i):
     return G[path[i-1]][path[i]]['cost'] + G[path[i]][path[i+1]]['cost']
-
-
-def intraroute_swap(paths):
-    # first improvement
-
-    sol = []
-    for path in paths:
-        finished = False
-        while (not finished):
-            indexes = list(range(1, len(path) - 1))
-            random.shuffle(indexes)
-            for i, n in enumerate(indexes):
-                path_cost_n = get_neighbour_cost(path, n)
-                for m in indexes[i+1:]:
-                    path_cost = path_cost_n + get_neighbour_cost(path, m)
-                    swap_path = copy.deepcopy(path)
-                    swap_path[n], swap_path[m] = swap_path[m], swap_path[n]
-                    swap_cost = get_neighbour_cost(swap_path, n) + get_neighbour_cost(swap_path, m)
-                    if (swap_cost < path_cost):
-                        path = swap_path
-                        cost = swap_cost
-                        break
-                else:
-                    continue
-                break   # Break out of the nested loop as well
-            finished = True
-
-        sol.append(path)
-
-    cost = 0
-    for path in sol:
-        cost += get_path_cost(path)
-
-    return (sol, cost)
-
-
-def intraroute_insertion(paths):
-
-    sol = []
-    for path in paths:
-        finished = False
-        while (not finished):
-            indexes = list(range(1, len(path) - 1))
-            random.shuffle(indexes)
-            path_cost = get_path_cost(path)     # lo he cambiado, si funciona bien borrar el comentario
-            for n in indexes:
-                for m in indexes:
-                    if n == m:
-                        continue
-                    # print(path)
-                    # print(n, m)
-                    insertion_path = copy.deepcopy(path)
-                    item = insertion_path.pop(n)
-                    insertion_path.insert(m, item)
-                    # print(insertion_path)
-                    # print('-----------')
-                    insertion_cost = get_path_cost(insertion_path)
-                    if (insertion_cost < path_cost):
-                        path = insertion_path
-                        cost = insertion_cost
-                        break
-                else:
-                    continue
-                break   # Break out of the nested loop as well
-            finished = True
-
-        sol.append(path)
-
-    cost = 0
-    for path in sol:
-        cost += get_path_cost(path)
-
-    return (sol, cost)
-
-
-def interroute_swap(paths):
-
-    def loop():
-        for x in range(len(paths) - 1):
-            indexes_x = list(range(1, len(paths[x]) - 1))
-            random.shuffle(indexes_x)
-            for y in range(x + 1, len(paths)):
-                indexes_y = list(range(1, len(paths[y]) - 1))
-                random.shuffle(indexes_y)
-                for n in indexes_x:
-                    for m in indexes_y:
-                        path_cost = get_neighbour_cost(paths[x], n) + get_neighbour_cost(paths[y], m)
-                        swap_path_x, swap_path_y = copy.deepcopy(paths[x]), copy.deepcopy(paths[y])
-                        swap_path_x[n], swap_path_y[m] = swap_path_y[m], swap_path_x[n]
-                        swap_cost = get_neighbour_cost(swap_path_x, n) + get_neighbour_cost(swap_path_y, m)
-                        if (swap_cost < path_cost and
-                            is_path_feasible(swap_path_x) and is_path_feasible(swap_path_y)
-                            ):
-                            paths[x], paths[y] = swap_path_x, swap_path_y
-                            return True
-        return False
-    
-    while loop():
-        pass
-
-    cost = 0
-    for path in paths:
-        cost += get_path_cost(path)
-
-    return paths, cost 
-
-
-def interroute_insertion(paths):
-
-    def loop():
-        for x in range(len(paths)):
-            path_cost_x = get_path_cost(paths[x])
-            indexes_x = list(range(1, len(paths[x]) - 1))
-            random.shuffle(indexes_x)
-            for y in range(len(paths)):
-                if x == y:
-                    continue
-                path_cost = path_cost_x + get_path_cost(paths[y])
-                indexes_y = list(range(1, len(paths[y]) - 1))
-                random.shuffle(indexes_y)
-                for n in indexes_x:
-                    for m in indexes_y:
-                        insertion_path_x, insertion_path_y = copy.deepcopy(paths[x]), copy.deepcopy(paths[y])
-                        item = insertion_path_x.pop(n)
-                        insertion_path_y.insert(m, item)
-                        swap_cost = get_path_cost(insertion_path_x) + get_path_cost(insertion_path_y)
-                        if (swap_cost < path_cost and
-                            is_path_feasible(insertion_path_x) and is_path_feasible(insertion_path_y)
-                            ):
-                            paths[x], paths[y] = insertion_path_x, insertion_path_y
-                            return True
-        return False
-    
-    while loop():
-        pass
-
-    cost = 0
-    for path in paths:
-        cost += get_path_cost(path)
-
-    return paths, cost 
-
-
-def two_opt_swap(paths):
-    sol = []
-    for path in paths:
-        finished = False
-        while not finished:
-            indexes = list(range(1, len(path) - 1))
-            random.shuffle(indexes)
-            path_cost = get_path_cost(path)
-            for i in indexes:
-                for j in indexes:
-                    if i == j:
-                        continue
-                    x, y = i, j
-                    if i > j:
-                        x, y = j, i
-                    # i, j = path.index(n), path.index(m)
-                    swap_path = (
-                        path[:x] +
-                        path[x:y][::-1] +
-                        path[y:]
-                    )
-                    # print(x, y)
-                    # print(path, swap_path)
-                    # print('---------')
-                    swap_cost = get_path_cost(swap_path)
-                    if (swap_cost < path_cost):
-                        path = swap_path
-                        cost = swap_cost
-                        break
-                else:
-                    continue
-                break   # Break out of the nested loop as well
-            finished = True
-
-        sol.append(path)
-
-    cost = 0
-    for path in sol:
-        cost += get_path_cost(path)
-
-    return (sol, cost)
 
 
 def print_sol(sol, cost):
