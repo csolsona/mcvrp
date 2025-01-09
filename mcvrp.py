@@ -3,6 +3,7 @@ import copy
 import math
 import random
 import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 import networkx as nx
 import numpy as np
@@ -46,64 +47,75 @@ def solve(G, k_max, n):
     sol, cost = nearest_neighbour_alg(G)
     if (not sol):
         exit(-1)
-    print_sol(sol, cost)
+    # print_sol(sol, cost)
 
-    sol, cost = vns(sol, cost, k_max, n)
+    with ProcessPoolExecutor() as executor:
+        futures = [executor.submit(vns, G, sol, cost, k_max) for i in range(n)]
+
+    results = []
+    for future in as_completed(futures):
+        results.append(future.result())
+
+    sol, cost = min(results, key=lambda x: x[1])
+    a = sum([x[1] for x in results]) / len(results)
+    print('avg =', a)
+
+
+    # sol, cost = vns(sol, cost, k_max, n)
     
     for path in sol:
-        print(is_path_feasible(path), end=", ")
+        print(is_path_feasible(G, path), end=", ")
     print()
 
     return sol, cost
 
 
 # Variable neighborhood search (VNS)
-def vns(sol, cost, k_max, n):
-
-    for _ in range(n):
-        k = 5
-        cost = get_sol_cost(sol)
-        while (k <= k_max):
-            shaken_sol = shake(sol, k)
-            new_sol, new_cost = local_search(shaken_sol)
-            if (new_cost < cost):
-                print(new_cost)
-                k = 5
-                sol = new_sol
-                cost = new_cost
-            else:
-                k += 5
+def vns(G, sol, cost, k_max):
+    k = 5
+    cost = get_sol_cost(G, sol)
+    while (k <= k_max):
+        shaken_sol = shake(G, sol, k)
+        new_sol, new_cost = local_search(G, shaken_sol)
+        if (new_cost < cost):
+            # print(new_cost)
+            k = 5
+            sol = new_sol
+            cost = new_cost
+        else:
+            k += 5
     
+    print(cost)
     return sol, cost
 
 
-def local_search(sol):
+def local_search(G, sol):
 
-    cost = get_sol_cost(sol)
+    cost = get_sol_cost(G, sol)
     i = 0
 
     new_cost = cost
     while (True):
         i += 1
         cost = new_cost
-        sol, new_cost = intraroute_swap(sol)
+        sol, new_cost = intraroute_swap(G, sol)
         if (new_cost < cost): continue
-        sol, new_cost = interroute_swap(sol)
+        sol, new_cost = interroute_swap(G, sol)
         if (new_cost < cost): continue
-        sol, new_cost = two_opt_swap(sol)
+        sol, new_cost = two_opt_swap(G, sol)
         if (new_cost < cost): continue
-        sol, new_cost = intraroute_insertion(sol)
+        sol, new_cost = intraroute_insertion(G, sol)
         if (new_cost < cost): continue
-        sol, new_cost = interroute_insertion(sol)
+        sol, new_cost = interroute_insertion(G, sol)
         if (new_cost < cost): continue
         break
 
     # print('i:', i)
-    
+
     return sol, cost
 
 
-def shake(sol, k):
+def shake(G, sol, k):
     # print('k:', k)
 
     def generate_indexes(sol, visited_nodes):
@@ -135,7 +147,7 @@ def shake(sol, k):
                 y, j = indexes_dest.pop()
                 # print(shaken_sol)
                 shaken_sol[y].insert(j, item)
-                if (is_path_feasible(shaken_sol[x]) and is_path_feasible(shaken_sol[y])):
+                if (is_path_feasible(G, shaken_sol[x]) and is_path_feasible(G, shaken_sol[y])):
                     visited_nodes.append(item)
                     nodes_changed += 1
                     break
@@ -221,17 +233,17 @@ def get_nearest_neighbour(G, start_node, capacity, time_limit):
     return neighbors[0][0]
 
 
-def intraroute_swap(paths):
+def intraroute_swap(G, paths):
 
     def loop(path):
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
         for i, n in enumerate(indexes):
-            path_cost_n = get_neighbour_cost(path, n)
+            path_cost_n = get_neighbour_cost(G, path, n)
             for m in indexes[i+1:]:
-                path_cost = path_cost_n + get_neighbour_cost(path, m)
+                path_cost = path_cost_n + get_neighbour_cost(G, path, m)
                 path[n], path[m] = path[m], path[n]
-                swap_cost = get_neighbour_cost(path, n) + get_neighbour_cost(path, m)
+                swap_cost = get_neighbour_cost(G, path, n) + get_neighbour_cost(G, path, m)
                 if (swap_cost < path_cost):
                     return path
                 else:
@@ -243,25 +255,24 @@ def intraroute_swap(paths):
         while path:
             path = loop(path)
 
-    cost = get_sol_cost(paths)
+    cost = get_sol_cost(G, paths)
 
     return (paths, cost)
 
 
-def intraroute_insertion(paths):
-    sol = []
+def intraroute_insertion(G, paths):
 
     def loop(path):
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
-        path_cost = get_path_cost(path)
+        path_cost = get_path_cost(G, path)
         for n in indexes:
             for m in indexes:
                 if n == m:
                     continue
                 item = path.pop(n)
                 path.insert(m, item)
-                insertion_cost = get_path_cost(path)
+                insertion_cost = get_path_cost(G, path)
                 if (insertion_cost < path_cost):
                     return path
                 else:
@@ -275,12 +286,12 @@ def intraroute_insertion(paths):
         while path:
             path = loop(path)
 
-    cost = get_sol_cost(paths)
+    cost = get_sol_cost(G, paths)
 
     return (paths, cost)
 
 
-def interroute_swap(paths):
+def interroute_swap(G, paths):
 
     def loop():
         for x in range(len(paths) - 1):
@@ -290,13 +301,13 @@ def interroute_swap(paths):
                 indexes_y = list(range(1, len(paths[y]) - 1))
                 random.shuffle(indexes_y)
                 for n in indexes_x:
-                    path_cost_x = get_neighbour_cost(paths[x], n)
+                    path_cost_x = get_neighbour_cost(G, paths[x], n)
                     for m in indexes_y:
-                        path_cost = path_cost_x + get_neighbour_cost(paths[y], m)
+                        path_cost = path_cost_x + get_neighbour_cost(G, paths[y], m)
                         paths[x][n], paths[y][m] = paths[y][m], paths[x][n]
-                        swap_cost = get_neighbour_cost(paths[x], n) + get_neighbour_cost(paths[y], m)
+                        swap_cost = get_neighbour_cost(G, paths[x], n) + get_neighbour_cost(G, paths[y], m)
                         if (swap_cost < path_cost and
-                            is_path_feasible(paths[x]) and is_path_feasible(paths[y])
+                            is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
                             ):
                             return True
                         else:
@@ -307,31 +318,31 @@ def interroute_swap(paths):
     while loop():
         pass
 
-    cost = get_sol_cost(paths)
+    cost = get_sol_cost(G, paths)
 
     return (paths, cost)
 
 
-def interroute_insertion(paths):
+def interroute_insertion(G, paths):
 
     def loop():
         for x in range(len(paths)):
-            path_cost_x = get_path_cost(paths[x])
+            path_cost_x = get_path_cost(G, paths[x])
             indexes_x = list(range(1, len(paths[x]) - 1))
             random.shuffle(indexes_x)
             for y in range(len(paths)):
                 if x == y:
                     continue
-                path_cost = path_cost_x + get_path_cost(paths[y])
+                path_cost = path_cost_x + get_path_cost(G, paths[y])
                 indexes_y = list(range(1, len(paths[y]) - 1))
                 random.shuffle(indexes_y)
                 for n in indexes_x:
                     for m in indexes_y:
                         item = paths[x].pop(n)
                         paths[y].insert(m, item)
-                        swap_cost = get_path_cost(paths[x]) + get_path_cost(paths[y])
+                        swap_cost = get_path_cost(G, paths[x]) + get_path_cost(G, paths[y])
                         if (swap_cost < path_cost and
-                            is_path_feasible(paths[x]) and is_path_feasible(paths[y])
+                            is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
                             ):
                             return True
                         else:
@@ -342,18 +353,18 @@ def interroute_insertion(paths):
     while loop():
         pass
 
-    cost = get_sol_cost(paths)
+    cost = get_sol_cost(G, paths)
 
     return (paths, cost) 
 
 
-def two_opt_swap(paths):
+def two_opt_swap(G, paths):
     sol = []
 
     def loop(path):
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
-        path_cost = get_path_cost(path)
+        path_cost = get_path_cost(G, path)
         for i in indexes:
             for j in indexes:
                 if i == j:
@@ -366,7 +377,7 @@ def two_opt_swap(paths):
                     path[x:y][::-1] +
                     path[y:]
                 )
-                swap_cost = get_path_cost(swap_path)
+                swap_cost = get_path_cost(G, swap_path)
                 if (swap_cost < path_cost):
                     return swap_path
         
@@ -377,13 +388,13 @@ def two_opt_swap(paths):
         while path:
             path = loop(path)
 
-    cost = get_sol_cost(paths)
+    cost = get_sol_cost(G, paths)
 
     return (sol, cost)
 
 
 # Sum of nodes does not exceed the maximum capacity
-def is_path_feasible(path):
+def is_path_feasible(G, path):
     return (
         sum(G.nodes[a]['demand'][0] for a in path) <= G.graph['capacity'][0]
         and
@@ -391,15 +402,15 @@ def is_path_feasible(path):
     )
 
 
-def get_sol_cost(sol):
-    return sum(get_path_cost(path) for path in sol)
+def get_sol_cost(G, sol):
+    return sum(get_path_cost(G, path) for path in sol)
 
 
-def get_path_cost(path):
+def get_path_cost(G, path):
     return sum(G[a][b]['cost'] for a, b in zip(path, path[1:]))
 
 
-def get_neighbour_cost(path, i):
+def get_neighbour_cost(G, path, i):
     return G[path[i-1]][path[i]]['cost'] + G[path[i]][path[i+1]]['cost']
 
 
@@ -412,13 +423,15 @@ def print_sol(sol, cost):
     print('Total cost:', round(cost, 1))
 
 
-start_time = time.time()
+if __name__ == '__main__':
+    start_time = time.time()
 
-global G
-G = init()
+    global G
+    G = init()
 
-sol, cost = solve(G, 20, 1)
+    n_threads = 12
+    sol, cost = solve(G, 20, n_threads)
 
-end_time = time.time()
-print_sol(sol, cost)
-print("--- %s seconds ---" % (end_time - start_time))
+    end_time = time.time()
+    print_sol(sol, cost)
+    print("--- %s seconds ---" % (end_time - start_time))
