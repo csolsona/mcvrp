@@ -46,8 +46,8 @@ def solve(G, k_max, n):
 
     sol, cost = nearest_neighbour_alg(G)
     if (not sol):
-        exit(-1)
-    # print_sol(sol, cost)
+        print('Error. Solution not valid')
+        exit(1)
 
     with ProcessPoolExecutor() as executor:
         futures = [executor.submit(vns, G, sol, cost, k_max) for i in range(n)]
@@ -57,15 +57,15 @@ def solve(G, k_max, n):
         results.append(future.result())
 
     sol, cost = min(results, key=lambda x: x[1])
-    a = sum([x[1] for x in results]) / len(results)
-    print('avg =', a)
-
-
-    # sol, cost = vns(sol, cost, k_max, n)
     
-    for path in sol:
-        print(is_path_feasible(G, path), end=", ")
-    print()
+    valid_sol = all([is_path_feasible(G, path) for path in sol])
+    if (not valid_sol):
+        print('Error. Solution not valid')
+        exit(1)
+    
+    print('Valid solution')
+
+    print('Average:', sum([x[1] for x in results]) / len(results))
 
     return sol, cost
 
@@ -85,7 +85,7 @@ def vns(G, sol, cost, k_max):
         else:
             k += 5
     
-    print(cost)
+    # print(cost)
     return sol, cost
 
 
@@ -110,21 +110,21 @@ def local_search(G, sol):
         if (new_cost < cost): continue
         break
 
-    # print('i:', i)
-
     return sol, cost
 
 
 def shake(G, sol, k):
-    # print('k:', k)
 
     def generate_indexes(sol, visited_nodes):
         indexes = []
         for i, path in enumerate(sol):
-            for j, node in enumerate(path):
-                if (node == 0) or (node in visited_nodes):
-                    continue
-                indexes.append((i, j))
+            if (len(path) == 2):
+                indexes.append((i, 1))
+            else:
+                for j, node in enumerate(path):
+                    if (node == 0) or (node in visited_nodes):
+                        continue
+                    indexes.append((i, j))
         return indexes
 
     nodes_to_change = math.ceil(len(generate_indexes(sol, [])) * (k / 100))
@@ -140,12 +140,14 @@ def shake(G, sol, k):
             random.shuffle(indexes_dest)
 
             x, i = indexes_orig.pop()
+            while (len(shaken_sol[x]) < 3):
+                x, i = indexes_orig.pop()
+
             item = shaken_sol[x].pop(i)
             while True:
                 if (not indexes_dest):
                     return False
                 y, j = indexes_dest.pop()
-                # print(shaken_sol)
                 shaken_sol[y].insert(j, item)
                 if (is_path_feasible(G, shaken_sol[x]) and is_path_feasible(G, shaken_sol[y])):
                     visited_nodes.append(item)
@@ -180,7 +182,6 @@ def can_satisfy(capacity, demand):
 
 
 def nearest_neighbour_alg(G):
-    # Nearest neighbour algorithm
     sol = []
     cost = 0
 
@@ -278,8 +279,7 @@ def intraroute_insertion(G, paths):
                 else:
                     item = path.pop(m)
                     path.insert(n, item)
-        
-        # sol.append(path)
+
         return False
     
     for path in paths:
@@ -327,10 +327,14 @@ def interroute_insertion(G, paths):
 
     def loop():
         for x in range(len(paths)):
+            if paths[x] not in paths:
+                break
             path_cost_x = get_path_cost(G, paths[x])
             indexes_x = list(range(1, len(paths[x]) - 1))
             random.shuffle(indexes_x)
             for y in range(len(paths)):
+                if paths[y] not in paths:
+                    break
                 if x == y:
                     continue
                 path_cost = path_cost_x + get_path_cost(G, paths[y])
@@ -407,6 +411,8 @@ def get_sol_cost(G, sol):
 
 
 def get_path_cost(G, path):
+    if (len(path) < 3):
+        return 0
     return sum(G[a][b]['cost'] for a, b in zip(path, path[1:]))
 
 
