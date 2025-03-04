@@ -1,21 +1,21 @@
-import sys
 import copy
 import math
 import random
 import time
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import argparse
 
 import networkx as nx
 import numpy as np
 
 
-def init():
-    if (len(sys.argv) < 2):
-        print("Not enough parameters")
-        exit(1)
+def init(file_name):
     
-    file_name = sys.argv[1]
-    f = open("instances/Abdulkader/" + file_name)
+    try:
+        f = open("instances/" + file_name)
+    except FileNotFoundError as e:
+        print(e)
+        exit(1)
 
     data = f.readline().strip().split()
     n = int(data[5])
@@ -41,73 +41,79 @@ def init():
     
     return G
 
+        
 
-def solve(G, k_max, n):
+def solve(G, k_max, num_threads):
 
     sol, cost = nearest_neighbour_alg(G)
-    if (not sol):
-        print('Error. Solution not valid')
-        exit(1)
 
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(vns, G, sol, cost, k_max) for i in range(n)]
+        futures = [executor.submit(execute, G, sol, k_max) for _ in range(num_threads)]
 
     results = []
     for future in as_completed(futures):
         results.append(future.result())
 
-    sol, cost = min(results, key=lambda x: x[1])
-    
-    valid_sol = all([is_path_feasible(G, path) for path in sol])
+    all_sol = list(map(lambda x: x[0], results))
+
+    valid_sol = all([is_path_feasible(G, path) for sol in all_sol for path in sol])
     if (not valid_sol):
         print('Error. Solution not valid')
         exit(1)
     
     print('Valid solution')
 
-    print('Average:', sum([x[1] for x in results]) / len(results))
-
-    return sol, cost
+    return results
 
 
-# Variable neighborhood search (VNS)
-def vns(G, sol, cost, k_max):
+def execute(G, sol, k_max):
+        start_time = time.perf_counter()
+        sol, cost = gvns(G, sol, k_max)
+        end_time = time.perf_counter()
+        execute_time = end_time - start_time
+        return (sol, cost, execute_time)
+
+
+# General Variable neighborhood search (GVNS)
+def gvns(G, sol, k_max):
     k = 5
     cost = get_sol_cost(G, sol)
     while (k <= k_max):
         shaken_sol = shake(G, sol, k)
-        new_sol, new_cost = local_search(G, shaken_sol)
+        new_sol, new_cost = vnd(G, shaken_sol)
         if (new_cost < cost):
-            # print(new_cost)
             k = 5
             sol = new_sol
             cost = new_cost
         else:
             k += 5
-    
-    # print(cost)
+
     return sol, cost
 
 
-def local_search(G, sol):
+# Variable Neighborhood Descent (VND)
+def vnd(G, sol):
 
     cost = get_sol_cost(G, sol)
     i = 0
 
     new_cost = cost
+    
     while (True):
         i += 1
         cost = new_cost
         sol, new_cost = intraroute_swap(G, sol)
         if (new_cost < cost): continue
-        sol, new_cost = interroute_swap(G, sol)
+        sol, new_cost = intraroute_insertion(G, sol)
         if (new_cost < cost): continue
         sol, new_cost = two_opt_swap(G, sol)
         if (new_cost < cost): continue
-        sol, new_cost = intraroute_insertion(G, sol)
+        sol, new_cost = interroute_swap(G, sol)
         if (new_cost < cost): continue
         sol, new_cost = interroute_insertion(G, sol)
         if (new_cost < cost): continue
+        
+        
         break
 
     return sol, cost
@@ -181,6 +187,51 @@ def can_satisfy(capacity, demand):
 
 
 
+def random_alg(G):
+
+    def can_append(path, prev_node, node, capacity, time_limit):
+        path.append(node)
+        path.append(0)
+        capacity[0] -= G.nodes[node]['demand'][0]
+        capacity[1] -= G.nodes[node]['demand'][1]
+        time_limit -= G[prev_node][node]['cost']
+        time_limit -= G[node][0]['cost']
+        path.pop()
+        path.pop()
+        return (capacity[0] > 0) and (capacity[1] > 0) and (time_limit > 0)
+
+
+    sol = []
+    start_node = 0
+    prev_node = start_node
+    nodes = list(range(1, G.number_of_nodes()))
+    random.shuffle(nodes)
+    capacity = G.graph['capacity'].copy()
+    time_limit = G.graph['max_time']
+    path = [start_node]
+    while nodes:
+        node = nodes.pop()
+        if can_append(path, start_node, node, capacity, time_limit):
+            path.append(node)
+            capacity[0] -= G.nodes[node]['demand'][0]
+            capacity[1] -= G.nodes[node]['demand'][1]
+            time_limit -= G[prev_node][node]['cost']
+            prev_node = node
+        else:
+            path.append(start_node)
+            sol.append(path)
+            prev_node = start_node
+            capacity = G.graph['capacity'].copy()
+            time_limit = G.graph['max_time']
+            nodes.insert(0, node)
+            path = [start_node]
+
+
+    cost = get_sol_cost(G, sol)
+
+    return (sol, cost)
+
+
 def nearest_neighbour_alg(G):
     sol = []
     cost = 0
@@ -194,8 +245,7 @@ def nearest_neighbour_alg(G):
         while nearest != -1:
             G.nodes[nearest]['visited'] = True
             cost += G[start_node][nearest]['cost']
-            time_limit -= G[start_node][nearest]['cost']  
-            # print(time_limit)   # I don't know how this works
+            time_limit -= G[start_node][nearest]['cost']
             path.append(nearest)
             capacity[0] -= G.nodes[nearest]['demand'][0]
             capacity[1] -= G.nodes[nearest]['demand'][1]
@@ -213,8 +263,17 @@ def nearest_neighbour_alg(G):
     non_visited_nodes = [node for node in G.nodes() if not G.nodes[node]['visited']]
     if (len(non_visited_nodes) > 0):
         return False
+    
+    cost = get_sol_cost(G, sol)
 
     return (sol, cost)
+
+
+def is_appendable(start_node, node, capacity, time_limit):
+    return (
+        can_satisfy(capacity, G.nodes[node]['demand'])
+        and G[start_node][node]['cost'] <= time_limit
+    )
 
 
 def get_nearest_neighbour(G, start_node, capacity, time_limit):
@@ -420,24 +479,71 @@ def get_neighbour_cost(G, path, i):
     return G[path[i-1]][path[i]]['cost'] + G[path[i]][path[i+1]]['cost']
 
 
-def print_sol(sol, cost):
-    if not sol:
-        print('No solution found')
-        return
 
-    print('Paths:', sol)
-    print('Total cost:', round(cost, 1))
+def print_results(results, num_threads, k_max):
 
+    best_sol, best_cost, best_ex_time = min(results, key=lambda x: x[1])
+
+    print()
+    print('Runs:', num_threads)
+    print('Max neighborhood:', k_max)
+    print()
+
+    print('Best sol:', best_sol)
+    print('Best cost:', round(best_cost, 1))
+    print('Best time:', round(best_ex_time, 3), 's')
+    print()
+
+    average_cost = sum([x[1] for x in results]) / len(results)
+    print('Average cost:', round(average_cost, 1))
+    average_time = round((sum([x[2] for x in results]) / len(results)), 3)
+    print('Average time:', average_time, 's')
+    print('Dev:', round(abs(best_cost - average_cost) / best_cost * 100, 1), '%')
+
+    return
+
+
+
+def check_parameters():
+    parser = argparse.ArgumentParser(description="Routing optimization with solution shaking to escape local optima.")
+
+    parser.add_argument(
+        "--instance", 
+        type = str,
+        required = True,
+        help = "Path to the file containing the instance to be executed."
+    )
+
+    parser.add_argument(
+        "--max-neighborhood", 
+        type = int,
+        default = 20,
+        help = "Maximum neighborhood size to shake the solution and escape local optima (max 50)."
+    )
+
+    parser.add_argument(
+        "--runs", 
+        type = int,
+        default = 1,
+        help = "Number of times the program will be executed for each instance."
+    )
+
+    args = parser.parse_args()
+
+    if args.max_neighborhood > 50:
+        parser.error("--max-neighborhood must be less than or equal to 50.")
+    
+    return args
 
 if __name__ == '__main__':
-    start_time = time.time()
 
-    global G
-    G = init()
+    args = check_parameters()
 
-    n_threads = 12
-    sol, cost = solve(G, 20, n_threads)
+    G = init(args.instance)
 
-    end_time = time.time()
-    print_sol(sol, cost)
-    print("--- %s seconds ---" % (end_time - start_time))
+    runs = int(args.runs)
+    k_max = int(args.max_neighborhood)
+    
+    results = solve(G, k_max, runs)
+
+    print_results(results, runs, k_max)
