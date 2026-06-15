@@ -196,6 +196,7 @@ def random_alg(G):
         capacity[1] -= G.nodes[node]['demand'][1]
         time_limit -= G[prev_node][node]['cost']
         time_limit -= G[node][0]['cost']
+        time_limit -= G.graph['drop_time']
         path.pop()
         path.pop()
         return (capacity[0] > 0) and (capacity[1] > 0) and (time_limit > 0)
@@ -216,6 +217,7 @@ def random_alg(G):
             capacity[0] -= G.nodes[node]['demand'][0]
             capacity[1] -= G.nodes[node]['demand'][1]
             time_limit -= G[prev_node][node]['cost']
+            time_limit -= G.graph['drop_time']
             prev_node = node
         else:
             path.append(start_node)
@@ -246,6 +248,7 @@ def nearest_neighbour_alg(G):
             G.nodes[nearest]['visited'] = True
             cost += G[start_node][nearest]['cost']
             time_limit -= G[start_node][nearest]['cost']
+            time_limit -= G.graph['drop_time']
             path.append(nearest)
             capacity[0] -= G.nodes[nearest]['demand'][0]
             capacity[1] -= G.nodes[nearest]['demand'][1]
@@ -272,7 +275,7 @@ def nearest_neighbour_alg(G):
 def is_appendable(start_node, node, capacity, time_limit):
     return (
         can_satisfy(capacity, G.nodes[node]['demand'])
-        and G[start_node][node]['cost'] <= time_limit
+        and G[start_node][node]['cost'] + G.graph['drop_time'] <= time_limit
     )
 
 
@@ -283,7 +286,7 @@ def get_nearest_neighbour(G, start_node, capacity, time_limit):
         if (
             not G.nodes[neighbour]['visited']
             and can_satisfy(capacity, G.nodes[neighbour]['demand'])
-            and G[start_node][neighbour]['cost'] <= time_limit
+            and G[start_node][neighbour]['cost'] + G.graph['drop_time'] + G[neighbour][0]['cost'] <= time_limit
         )
     ]
     if (len(neighbors) == 0):
@@ -458,10 +461,13 @@ def two_opt_swap(G, paths):
 
 # Sum of nodes does not exceed the maximum capacity
 def is_path_feasible(G, path):
+    num_customers = sum(1 for a in path if a != 0)
     return (
         sum(G.nodes[a]['demand'][0] for a in path) <= G.graph['capacity'][0]
         and
         sum(G.nodes[a]['demand'][1] for a in path) <= G.graph['capacity'][1]
+        and
+        get_path_cost(G, path) + num_customers * G.graph['drop_time'] <= G.graph['max_time']
     )
 
 
