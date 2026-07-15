@@ -46,17 +46,25 @@ def init(file_name):
             distance = get_distance(G.nodes[i], G.nodes[j])
             G.add_edge(i, j, cost=distance)
 
-    # Precompute, for each customer, the NEIGHBOURHOOD_SIZE nearest customers
-    # (depot 0 excluded), sorted by ascending distance. The local search
-    # operators restrict their candidate partners to these lists.
-    neighbours = {}
+    # Precompute, for each customer, the other customers sorted by ascending
+    # distance (depot 0 excluded). The active candidate lists used by the
+    # operators (G.graph['neighbours']) are a prefix of these, set by
+    # set_neighbourhood_size so the size can be varied without rebuilding.
+    neighbours_sorted = {}
     customer_ids = list(range(1, G.number_of_nodes()))
     for i in customer_ids:
-        order = sorted((j for j in customer_ids if j != i), key=lambda j: G[i][j]['cost'])
-        neighbours[i] = order[:NEIGHBOURHOOD_SIZE]
-    G.graph['neighbours'] = neighbours
+        neighbours_sorted[i] = sorted((j for j in customer_ids if j != i), key=lambda j: G[i][j]['cost'])
+    G.graph['neighbours_sorted'] = neighbours_sorted
+    set_neighbourhood_size(G, NEIGHBOURHOOD_SIZE)
 
     return G
+
+
+def set_neighbourhood_size(G, size):
+    # Restrict each customer's candidate list to its `size` nearest customers,
+    # re-slicing from the full sorted lists so no graph rebuild is needed.
+    full = G.graph['neighbours_sorted']
+    G.graph['neighbours'] = {i: full[i][:size] for i in full}
 
         
 
@@ -584,6 +592,13 @@ def check_parameters():
     )
 
     parser.add_argument(
+        "--neighbourhood-size",
+        type = int,
+        default = NEIGHBOURHOOD_SIZE,
+        help = "Number of nearest customers each local-search operator considers as move candidates (k)."
+    )
+
+    parser.add_argument(
         "--runs", 
         type = int,
         default = 1,
@@ -602,6 +617,7 @@ if __name__ == '__main__':
     args = check_parameters()
 
     G = init(args.instance)
+    set_neighbourhood_size(G, args.neighbourhood_size)
 
     runs = int(args.runs)
     k_max = int(args.max_neighborhood)
