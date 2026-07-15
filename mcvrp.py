@@ -12,6 +12,9 @@ import numpy as np
 # Size of the per-customer neighbourhood used to restrict candidate moves in the local search operators.
 NEIGHBOURHOOD_SIZE = 20
 
+# Minimum delta for a move to count as an improvement, so float round-off on zero-cost moves isn't mistaken for a gain.
+IMPROVEMENT_TOLERANCE = 1e-9
+
 
 def init(file_name):
     
@@ -350,21 +353,25 @@ def intraroute_insertion(G, paths):
         pos_of = {c: idx for idx, c in enumerate(path) if c != 0}
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
-        path_cost = get_path_cost(G, path)
         for n in indexes:
-            cust_n = path[n]
-            for nbr in neighbours[cust_n]:
+            X = path[n]
+            prev = path[n-1]
+            nxt = path[n+1]
+            delta_remove = G[prev][nxt]['cost'] - G[prev][X]['cost'] - G[X][nxt]['cost']
+            for nbr in neighbours[X]:
                 m = pos_of.get(nbr)
                 if m is None or m == n:
                     continue
-                item = path.pop(n)
-                path.insert(m, item)
-                insertion_cost = get_path_cost(G, path)
-                if (insertion_cost < path_cost):
-                    return path
+                # pop(n) then insert(m): X ends up between a and b
+                if m < n:
+                    a, b = path[m-1], path[m]
                 else:
-                    item = path.pop(m)
-                    path.insert(n, item)
+                    a, b = path[m], path[m+1]
+                delta = delta_remove + G[a][X]['cost'] + G[X][b]['cost'] - G[a][b]['cost']
+                if delta < -IMPROVEMENT_TOLERANCE:
+                    item = path.pop(n)
+                    path.insert(m, item)
+                    return path
 
         return False
     
@@ -431,27 +438,30 @@ def interroute_insertion(G, paths):
                 pos_of[p[k]] = (xi, k)
 
         for x in range(len(paths)):
-            path_cost_x = get_path_cost(G, paths[x])
             indexes_x = list(range(1, len(paths[x]) - 1))
             random.shuffle(indexes_x)
             for n in indexes_x:
-                cust_n = paths[x][n]
-                for nbr in neighbours[cust_n]:
+                X = paths[x][n]
+                x_prev = paths[x][n-1]
+                x_next = paths[x][n+1]
+                delta_remove = G[x_prev][x_next]['cost'] - G[x_prev][X]['cost'] - G[X][x_next]['cost']
+                for nbr in neighbours[X]:
                     pos = pos_of.get(nbr)
                     if pos is None:
                         continue
                     y, m = pos
                     if y == x:
                         continue
-                    path_cost = path_cost_x + get_path_cost(G, paths[y])
-                    item = paths[x].pop(n)
-                    paths[y].insert(m, item)
-                    swap_cost = get_path_cost(G, paths[x]) + get_path_cost(G, paths[y])
-                    if (swap_cost < path_cost and
-                        is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
-                        ):
-                        return True
-                    else:
+                    # insert(m) into route y: X ends up between y_prev and y_cur
+                    y_prev = paths[y][m-1]
+                    y_cur = paths[y][m]
+                    delta = (delta_remove
+                             + G[y_prev][X]['cost'] + G[X][y_cur]['cost'] - G[y_prev][y_cur]['cost'])
+                    if delta < -IMPROVEMENT_TOLERANCE:
+                        item = paths[x].pop(n)
+                        paths[y].insert(m, item)
+                        if is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y]):
+                            return True
                         item = paths[y].pop(m)
                         paths[x].insert(n, item)
         return False
@@ -472,25 +482,23 @@ def two_opt_swap(G, paths):
         pos_of = {c: idx for idx, c in enumerate(path) if c != 0}
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
-        path_cost = get_path_cost(G, path)
         for i in indexes:
             cust_i = path[i]
             for nbr in neighbours[cust_i]:
                 j = pos_of.get(nbr)
                 if j is None or j == i:
                     continue
-                x, y = i, j
-                if i > j:
-                    x, y = j, i
-                swap_path = (
-                    path[:x] +
-                    path[x:y][::-1] +
-                    path[y:]
+                x, y = (i, j) if i < j else (j, i)
+                if y - x < 2:
+                    continue
+                # Reversing path[x:y] only swaps the two boundary edges.
+                delta = (
+                    G[path[x-1]][path[y-1]]['cost'] + G[path[x]][path[y]]['cost']
+                    - G[path[x-1]][path[x]]['cost'] - G[path[y-1]][path[y]]['cost']
                 )
-                swap_cost = get_path_cost(G, swap_path)
-                if (swap_cost < path_cost):
-                    return swap_path
-        
+                if delta < -IMPROVEMENT_TOLERANCE:
+                    return path[:x] + path[x:y][::-1] + path[y:]
+
         sol.append(path)
         return False
     
