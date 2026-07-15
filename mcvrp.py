@@ -216,7 +216,7 @@ def random_alg(G):
         time_limit -= G.graph['drop_time']
         path.pop()
         path.pop()
-        return (capacity[0] > 0) and (capacity[1] > 0) and (time_limit > 0)
+        return (capacity[0] >= 0) and (capacity[1] >= 0) and (time_limit >= 0)
 
 
     sol = []
@@ -229,7 +229,7 @@ def random_alg(G):
     path = [start_node]
     while nodes:
         node = nodes.pop()
-        if can_append(path, start_node, node, capacity, time_limit):
+        if can_append(path, prev_node, node, capacity, time_limit):
             path.append(node)
             capacity[0] -= G.nodes[node]['demand'][0]
             capacity[1] -= G.nodes[node]['demand'][1]
@@ -245,6 +245,10 @@ def random_alg(G):
             nodes.insert(0, node)
             path = [start_node]
 
+    # Close and append the last open route, otherwise its customers are lost.
+    if len(path) > 1:
+        path.append(start_node)
+        sol.append(path)
 
     cost = get_sol_cost(G, sol)
 
