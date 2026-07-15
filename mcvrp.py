@@ -9,6 +9,10 @@ import networkx as nx
 import numpy as np
 
 
+# Size of the per-customer neighbourhood used to restrict candidate moves in the local search operators.
+NEIGHBOURHOOD_SIZE = 20
+
+
 def init(file_name):
     
     try:
@@ -38,7 +42,17 @@ def init(file_name):
         for j in range(i+1, n+1):
             distance = get_distance(G.nodes[i], G.nodes[j])
             G.add_edge(i, j, cost=distance)
-    
+
+    # Precompute, for each customer, the NEIGHBOURHOOD_SIZE nearest customers
+    # (depot 0 excluded), sorted by ascending distance. The local search
+    # operators restrict their candidate partners to these lists.
+    neighbours = {}
+    customer_ids = list(range(1, G.number_of_nodes()))
+    for i in customer_ids:
+        order = sorted((j for j in customer_ids if j != i), key=lambda j: G[i][j]['cost'])
+        neighbours[i] = order[:NEIGHBOURHOOD_SIZE]
+    G.graph['neighbours'] = neighbours
+
     return G
 
         
@@ -297,13 +311,19 @@ def get_nearest_neighbour(G, start_node, capacity, time_limit):
 
 
 def intraroute_swap(G, paths):
+    neighbours = G.graph['neighbours']
 
     def loop(path):
+        pos_of = {c: idx for idx, c in enumerate(path) if c != 0}
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
-        for i, n in enumerate(indexes):
+        for n in indexes:
+            cust_n = path[n]
             path_cost_n = get_neighbour_cost(G, path, n)
-            for m in indexes[i+1:]:
+            for nbr in neighbours[cust_n]:
+                m = pos_of.get(nbr)
+                if m is None or m == n:
+                    continue
                 path_cost = path_cost_n + get_neighbour_cost(G, path, m)
                 path[n], path[m] = path[m], path[n]
                 swap_cost = get_neighbour_cost(G, path, n) + get_neighbour_cost(G, path, m)
@@ -324,14 +344,18 @@ def intraroute_swap(G, paths):
 
 
 def intraroute_insertion(G, paths):
+    neighbours = G.graph['neighbours']
 
     def loop(path):
+        pos_of = {c: idx for idx, c in enumerate(path) if c != 0}
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
         path_cost = get_path_cost(G, path)
         for n in indexes:
-            for m in indexes:
-                if n == m:
+            cust_n = path[n]
+            for nbr in neighbours[cust_n]:
+                m = pos_of.get(nbr)
+                if m is None or m == n:
                     continue
                 item = path.pop(n)
                 path.insert(m, item)
@@ -354,26 +378,37 @@ def intraroute_insertion(G, paths):
 
 
 def interroute_swap(G, paths):
+    neighbours = G.graph['neighbours']
 
     def loop():
-        for x in range(len(paths) - 1):
+        # Global customer -> (route_idx, position) map, rebuilt each pass
+        pos_of = {}
+        for xi, p in enumerate(paths):
+            for k in range(1, len(p) - 1):
+                pos_of[p[k]] = (xi, k)
+
+        for x in range(len(paths)):
             indexes_x = list(range(1, len(paths[x]) - 1))
             random.shuffle(indexes_x)
-            for y in range(x + 1, len(paths)):
-                indexes_y = list(range(1, len(paths[y]) - 1))
-                random.shuffle(indexes_y)
-                for n in indexes_x:
-                    path_cost_x = get_neighbour_cost(G, paths[x], n)
-                    for m in indexes_y:
-                        path_cost = path_cost_x + get_neighbour_cost(G, paths[y], m)
+            for n in indexes_x:
+                cust_n = paths[x][n]
+                path_cost_x = get_neighbour_cost(G, paths[x], n)
+                for nbr in neighbours[cust_n]:
+                    pos = pos_of.get(nbr)
+                    if pos is None:
+                        continue
+                    y, m = pos
+                    if y == x:
+                        continue
+                    path_cost = path_cost_x + get_neighbour_cost(G, paths[y], m)
+                    paths[x][n], paths[y][m] = paths[y][m], paths[x][n]
+                    swap_cost = get_neighbour_cost(G, paths[x], n) + get_neighbour_cost(G, paths[y], m)
+                    if (swap_cost < path_cost and
+                        is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
+                        ):
+                        return True
+                    else:
                         paths[x][n], paths[y][m] = paths[y][m], paths[x][n]
-                        swap_cost = get_neighbour_cost(G, paths[x], n) + get_neighbour_cost(G, paths[y], m)
-                        if (swap_cost < path_cost and
-                            is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
-                            ):
-                            return True
-                        else:
-                            paths[x][n], paths[y][m] = paths[y][m], paths[x][n]
 
         return False
     
@@ -386,34 +421,39 @@ def interroute_swap(G, paths):
 
 
 def interroute_insertion(G, paths):
+    neighbours = G.graph['neighbours']
 
     def loop():
+        # Global customer -> (route_idx, position) map, rebuilt each pass
+        pos_of = {}
+        for xi, p in enumerate(paths):
+            for k in range(1, len(p) - 1):
+                pos_of[p[k]] = (xi, k)
+
         for x in range(len(paths)):
-            if paths[x] not in paths:
-                break
             path_cost_x = get_path_cost(G, paths[x])
             indexes_x = list(range(1, len(paths[x]) - 1))
             random.shuffle(indexes_x)
-            for y in range(len(paths)):
-                if paths[y] not in paths:
-                    break
-                if x == y:
-                    continue
-                path_cost = path_cost_x + get_path_cost(G, paths[y])
-                indexes_y = list(range(1, len(paths[y]) - 1))
-                random.shuffle(indexes_y)
-                for n in indexes_x:
-                    for m in indexes_y:
-                        item = paths[x].pop(n)
-                        paths[y].insert(m, item)
-                        swap_cost = get_path_cost(G, paths[x]) + get_path_cost(G, paths[y])
-                        if (swap_cost < path_cost and
-                            is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
-                            ):
-                            return True
-                        else:
-                            item = paths[y].pop(m)
-                            paths[x].insert(n, item)
+            for n in indexes_x:
+                cust_n = paths[x][n]
+                for nbr in neighbours[cust_n]:
+                    pos = pos_of.get(nbr)
+                    if pos is None:
+                        continue
+                    y, m = pos
+                    if y == x:
+                        continue
+                    path_cost = path_cost_x + get_path_cost(G, paths[y])
+                    item = paths[x].pop(n)
+                    paths[y].insert(m, item)
+                    swap_cost = get_path_cost(G, paths[x]) + get_path_cost(G, paths[y])
+                    if (swap_cost < path_cost and
+                        is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
+                        ):
+                        return True
+                    else:
+                        item = paths[y].pop(m)
+                        paths[x].insert(n, item)
         return False
     
     while loop():
@@ -425,15 +465,19 @@ def interroute_insertion(G, paths):
 
 
 def two_opt_swap(G, paths):
+    neighbours = G.graph['neighbours']
     sol = []
 
     def loop(path):
+        pos_of = {c: idx for idx, c in enumerate(path) if c != 0}
         indexes = list(range(1, len(path) - 1))
         random.shuffle(indexes)
         path_cost = get_path_cost(G, path)
         for i in indexes:
-            for j in indexes:
-                if i == j:
+            cust_i = path[i]
+            for nbr in neighbours[cust_i]:
+                j = pos_of.get(nbr)
+                if j is None or j == i:
                     continue
                 x, y = i, j
                 if i > j:
