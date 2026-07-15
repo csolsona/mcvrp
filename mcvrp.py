@@ -506,7 +506,7 @@ def two_opt_swap(G, paths):
         while path:
             path = loop(path)
 
-    cost = get_sol_cost(G, paths)
+    cost = get_sol_cost(G, sol)
 
     return (sol, cost)
 
