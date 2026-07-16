@@ -1,4 +1,3 @@
-import copy
 import math
 import random
 import time
@@ -40,20 +39,26 @@ def init(file_name):
     
     f.close()
 
-    # Add edges
-    for i in range(n):
-        for j in range(i+1, n+1):
-            distance = get_distance(G.nodes[i], G.nodes[j])
-            G.add_edge(i, j, cost=distance)
+    # Precomputed distance matrix as a list of lists of native Python floats.
+    # Scalar lookups dist[a][b] in the hot loops are far faster than networkx
+    # edge access (and faster than numpy scalar indexing). Built vectorised.
+    num_nodes = G.number_of_nodes()
+    coords = np.array([G.nodes[i]['coords'] for i in range(num_nodes)], dtype=float)
+    diffs = coords[:, None, :] - coords[None, :, :]
+    dist = np.sqrt((diffs ** 2).sum(axis=2)).tolist()
+    G.graph['dist'] = dist
+
+    # Demands as a plain list, for fast feasibility checks without node access.
+    G.graph['demands'] = [list(G.nodes[i]['demand']) for i in range(num_nodes)]
 
     # Precompute, for each customer, the other customers sorted by ascending
     # distance (depot 0 excluded). The active candidate lists used by the
     # operators (G.graph['neighbours']) are a prefix of these, set by
     # set_neighbourhood_size so the size can be varied without rebuilding.
     neighbours_sorted = {}
-    customer_ids = list(range(1, G.number_of_nodes()))
+    customer_ids = list(range(1, num_nodes))
     for i in customer_ids:
-        neighbours_sorted[i] = sorted((j for j in customer_ids if j != i), key=lambda j: G[i][j]['cost'])
+        neighbours_sorted[i] = sorted((j for j in customer_ids if j != i), key=lambda j: dist[i][j])
     G.graph['neighbours_sorted'] = neighbours_sorted
     set_neighbourhood_size(G, NEIGHBOURHOOD_SIZE)
 
@@ -159,7 +164,8 @@ def shake(G, sol, k):
     nodes_to_change = math.ceil(len(generate_indexes(sol, [])) * (k / 100))
     
     def loop():
-        shaken_sol = copy.deepcopy(sol)
+        # Shallow-copy each route: the elements are ints, so no deepcopy needed.
+        shaken_sol = [route[:] for route in sol]
         visited_nodes = []
         nodes_changed = 0
         while (nodes_changed < nodes_to_change):
@@ -199,26 +205,21 @@ def floatstr_to_int(str):
     return int(str.replace('.', ''))
 
 
-def get_distance(u, v):
-    p1 = u['coords']
-    p2 = v['coords']
-    return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
-
-
 def can_satisfy(capacity, demand):
     return (capacity[0] >= demand[0] and capacity[1] >= demand[1])
 
 
 
 def random_alg(G):
+    dist = G.graph['dist']
 
     def can_append(path, prev_node, node, capacity, time_limit):
         path.append(node)
         path.append(0)
         capacity[0] -= G.nodes[node]['demand'][0]
         capacity[1] -= G.nodes[node]['demand'][1]
-        time_limit -= G[prev_node][node]['cost']
-        time_limit -= G[node][0]['cost']
+        time_limit -= dist[prev_node][node]
+        time_limit -= dist[node][0]
         time_limit -= G.graph['drop_time']
         path.pop()
         path.pop()
@@ -239,7 +240,7 @@ def random_alg(G):
             path.append(node)
             capacity[0] -= G.nodes[node]['demand'][0]
             capacity[1] -= G.nodes[node]['demand'][1]
-            time_limit -= G[prev_node][node]['cost']
+            time_limit -= dist[prev_node][node]
             time_limit -= G.graph['drop_time']
             prev_node = node
         else:
@@ -262,6 +263,7 @@ def random_alg(G):
 
 
 def nearest_neighbour_alg(G):
+    dist = G.graph['dist']
     sol = []
     cost = 0
 
@@ -273,8 +275,8 @@ def nearest_neighbour_alg(G):
         nearest = get_nearest_neighbour(G, start_node, capacity, time_limit)
         while nearest != -1:
             G.nodes[nearest]['visited'] = True
-            cost += G[start_node][nearest]['cost']
-            time_limit -= G[start_node][nearest]['cost']
+            cost += dist[start_node][nearest]
+            time_limit -= dist[start_node][nearest]
             time_limit -= G.graph['drop_time']
             path.append(nearest)
             capacity[0] -= G.nodes[nearest]['demand'][0]
@@ -283,7 +285,7 @@ def nearest_neighbour_alg(G):
             nearest = get_nearest_neighbour(G, start_node, capacity, time_limit)
             if nearest == -1:
                 path.append(0)
-                cost += G[start_node][0]['cost']
+                cost += dist[start_node][0]
                 sol.append(path)
 
         non_visited_nodes = [node for node in G.nodes() if not G.nodes[node]['visited']]
@@ -299,32 +301,29 @@ def nearest_neighbour_alg(G):
     return (sol, cost)
 
 
-def is_appendable(start_node, node, capacity, time_limit):
-    return (
-        can_satisfy(capacity, G.nodes[node]['demand'])
-        and G[start_node][node]['cost'] + G.graph['drop_time'] <= time_limit
-    )
-
-
 def get_nearest_neighbour(G, start_node, capacity, time_limit):
+    dist = G.graph['dist']
+    drop_time = G.graph['drop_time']
     neighbors = [
-        (neighbour, G[start_node][neighbour]['cost'])
-        for neighbour in G.neighbors(start_node)
+        (neighbour, dist[start_node][neighbour])
+        for neighbour in range(1, G.number_of_nodes())
         if (
-            not G.nodes[neighbour]['visited']
+            neighbour != start_node
+            and not G.nodes[neighbour]['visited']
             and can_satisfy(capacity, G.nodes[neighbour]['demand'])
-            and G[start_node][neighbour]['cost'] + G.graph['drop_time'] + G[neighbour][0]['cost'] <= time_limit
+            and dist[start_node][neighbour] + drop_time + dist[neighbour][0] <= time_limit
         )
     ]
     if (len(neighbors) == 0):
         return -1
-    
+
     neighbors.sort(key=lambda x: x[1])
     return neighbors[0][0]
 
 
 def intraroute_swap(G, paths):
     neighbours = G.graph['neighbours']
+    dist = G.graph['dist']
 
     def loop(path):
         pos_of = {c: idx for idx, c in enumerate(path) if c != 0}
@@ -332,14 +331,14 @@ def intraroute_swap(G, paths):
         random.shuffle(indexes)
         for n in indexes:
             cust_n = path[n]
-            path_cost_n = get_neighbour_cost(G, path, n)
+            path_cost_n = get_neighbour_cost(dist, path, n)
             for nbr in neighbours[cust_n]:
                 m = pos_of.get(nbr)
                 if m is None or m == n:
                     continue
-                path_cost = path_cost_n + get_neighbour_cost(G, path, m)
+                path_cost = path_cost_n + get_neighbour_cost(dist, path, m)
                 path[n], path[m] = path[m], path[n]
-                swap_cost = get_neighbour_cost(G, path, n) + get_neighbour_cost(G, path, m)
+                swap_cost = get_neighbour_cost(dist, path, n) + get_neighbour_cost(dist, path, m)
                 if (swap_cost < path_cost):
                     return path
                 else:
@@ -358,6 +357,7 @@ def intraroute_swap(G, paths):
 
 def intraroute_insertion(G, paths):
     neighbours = G.graph['neighbours']
+    dist = G.graph['dist']
 
     def loop(path):
         pos_of = {c: idx for idx, c in enumerate(path) if c != 0}
@@ -367,7 +367,7 @@ def intraroute_insertion(G, paths):
             X = path[n]
             prev = path[n-1]
             nxt = path[n+1]
-            delta_remove = G[prev][nxt]['cost'] - G[prev][X]['cost'] - G[X][nxt]['cost']
+            delta_remove = dist[prev][nxt] - dist[prev][X] - dist[X][nxt]
             for nbr in neighbours[X]:
                 m = pos_of.get(nbr)
                 if m is None or m == n:
@@ -377,7 +377,7 @@ def intraroute_insertion(G, paths):
                     a, b = path[m-1], path[m]
                 else:
                     a, b = path[m], path[m+1]
-                delta = delta_remove + G[a][X]['cost'] + G[X][b]['cost'] - G[a][b]['cost']
+                delta = delta_remove + dist[a][X] + dist[X][b] - dist[a][b]
                 if delta < -IMPROVEMENT_TOLERANCE:
                     item = path.pop(n)
                     path.insert(m, item)
@@ -396,6 +396,7 @@ def intraroute_insertion(G, paths):
 
 def interroute_swap(G, paths):
     neighbours = G.graph['neighbours']
+    dist = G.graph['dist']
 
     def loop():
         # Global customer -> (route_idx, position) map, rebuilt each pass
@@ -409,7 +410,7 @@ def interroute_swap(G, paths):
             random.shuffle(indexes_x)
             for n in indexes_x:
                 cust_n = paths[x][n]
-                path_cost_x = get_neighbour_cost(G, paths[x], n)
+                path_cost_x = get_neighbour_cost(dist, paths[x], n)
                 for nbr in neighbours[cust_n]:
                     pos = pos_of.get(nbr)
                     if pos is None:
@@ -417,9 +418,9 @@ def interroute_swap(G, paths):
                     y, m = pos
                     if y == x:
                         continue
-                    path_cost = path_cost_x + get_neighbour_cost(G, paths[y], m)
+                    path_cost = path_cost_x + get_neighbour_cost(dist, paths[y], m)
                     paths[x][n], paths[y][m] = paths[y][m], paths[x][n]
-                    swap_cost = get_neighbour_cost(G, paths[x], n) + get_neighbour_cost(G, paths[y], m)
+                    swap_cost = get_neighbour_cost(dist, paths[x], n) + get_neighbour_cost(dist, paths[y], m)
                     if (swap_cost < path_cost and
                         is_path_feasible(G, paths[x]) and is_path_feasible(G, paths[y])
                         ):
@@ -439,6 +440,7 @@ def interroute_swap(G, paths):
 
 def interroute_insertion(G, paths):
     neighbours = G.graph['neighbours']
+    dist = G.graph['dist']
 
     def loop():
         # Global customer -> (route_idx, position) map, rebuilt each pass
@@ -454,7 +456,7 @@ def interroute_insertion(G, paths):
                 X = paths[x][n]
                 x_prev = paths[x][n-1]
                 x_next = paths[x][n+1]
-                delta_remove = G[x_prev][x_next]['cost'] - G[x_prev][X]['cost'] - G[X][x_next]['cost']
+                delta_remove = dist[x_prev][x_next] - dist[x_prev][X] - dist[X][x_next]
                 for nbr in neighbours[X]:
                     pos = pos_of.get(nbr)
                     if pos is None:
@@ -466,7 +468,7 @@ def interroute_insertion(G, paths):
                     y_prev = paths[y][m-1]
                     y_cur = paths[y][m]
                     delta = (delta_remove
-                             + G[y_prev][X]['cost'] + G[X][y_cur]['cost'] - G[y_prev][y_cur]['cost'])
+                             + dist[y_prev][X] + dist[X][y_cur] - dist[y_prev][y_cur])
                     if delta < -IMPROVEMENT_TOLERANCE:
                         item = paths[x].pop(n)
                         paths[y].insert(m, item)
@@ -486,6 +488,7 @@ def interroute_insertion(G, paths):
 
 def two_opt_swap(G, paths):
     neighbours = G.graph['neighbours']
+    dist = G.graph['dist']
     sol = []
 
     def loop(path):
@@ -503,8 +506,8 @@ def two_opt_swap(G, paths):
                     continue
                 # Reversing path[x:y] only swaps the two boundary edges.
                 delta = (
-                    G[path[x-1]][path[y-1]]['cost'] + G[path[x]][path[y]]['cost']
-                    - G[path[x-1]][path[x]]['cost'] - G[path[y-1]][path[y]]['cost']
+                    dist[path[x-1]][path[y-1]] + dist[path[x]][path[y]]
+                    - dist[path[x-1]][path[x]] - dist[path[y-1]][path[y]]
                 )
                 if delta < -IMPROVEMENT_TOLERANCE:
                     return path[:x] + path[x:y][::-1] + path[y:]
@@ -544,11 +547,13 @@ def all_local_searches(G, sol, operators=None):
 
 # Sum of nodes does not exceed the maximum capacity
 def is_path_feasible(G, path):
+    demands = G.graph['demands']
+    capacity = G.graph['capacity']
     num_customers = sum(1 for a in path if a != 0)
     return (
-        sum(G.nodes[a]['demand'][0] for a in path) <= G.graph['capacity'][0]
+        sum(demands[a][0] for a in path) <= capacity[0]
         and
-        sum(G.nodes[a]['demand'][1] for a in path) <= G.graph['capacity'][1]
+        sum(demands[a][1] for a in path) <= capacity[1]
         and
         get_path_cost(G, path) + num_customers * G.graph['drop_time'] <= G.graph['max_time']
     )
@@ -561,11 +566,12 @@ def get_sol_cost(G, sol):
 def get_path_cost(G, path):
     if (len(path) < 3):
         return 0
-    return sum(G[a][b]['cost'] for a, b in zip(path, path[1:]))
+    dist = G.graph['dist']
+    return sum(dist[a][b] for a, b in zip(path, path[1:]))
 
 
-def get_neighbour_cost(G, path, i):
-    return G[path[i-1]][path[i]]['cost'] + G[path[i]][path[i+1]]['cost']
+def get_neighbour_cost(dist, path, i):
+    return dist[path[i-1]][path[i]] + dist[path[i]][path[i+1]]
 
 
 
