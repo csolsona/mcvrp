@@ -367,7 +367,10 @@ def intraroute_insertion(G, paths):
             X = path[n]
             prev = path[n-1]
             nxt = path[n+1]
-            delta_remove = dist[prev][nxt] - dist[prev][X] - dist[X][nxt]
+            # prev == nxt (both depot) when X is the route's only customer:
+            # removing it collapses the route, so the closing edge costs 0.
+            close = 0 if prev == nxt else dist[prev][nxt]
+            delta_remove = close - dist[prev][X] - dist[X][nxt]
             for nbr in neighbours[X]:
                 m = pos_of.get(nbr)
                 if m is None or m == n:
@@ -456,7 +459,10 @@ def interroute_insertion(G, paths):
                 X = paths[x][n]
                 x_prev = paths[x][n-1]
                 x_next = paths[x][n+1]
-                delta_remove = dist[x_prev][x_next] - dist[x_prev][X] - dist[X][x_next]
+                # x_prev == x_next (both depot) when X is the route's only
+                # customer: removing it collapses the route (closing edge = 0).
+                close = 0 if x_prev == x_next else dist[x_prev][x_next]
+                delta_remove = close - dist[x_prev][X] - dist[X][x_next]
                 for nbr in neighbours[X]:
                     pos = pos_of.get(nbr)
                     if pos is None:
