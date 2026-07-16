@@ -117,29 +117,27 @@ def gvns(G, sol, k_max):
 
 
 # Variable Neighborhood Descent (VND)
-def vnd(G, sol):
+#
+# operators is the ordered list of local-search operators to explore. None uses
+# DEFAULT_VND_ORDER (defined after the operators). Passing a different order
+# (e.g. reversed) lets the experiments compare orderings without editing this.
+def vnd(G, sol, operators=None):
+    if operators is None:
+        operators = DEFAULT_VND_ORDER
 
     cost = get_sol_cost(G, sol)
-    i = 0
-
     new_cost = cost
-    
+
     while (True):
-        i += 1
         cost = new_cost
-        sol, new_cost = intraroute_swap(G, sol)
-        if (new_cost < cost): continue
-        sol, new_cost = intraroute_insertion(G, sol)
-        if (new_cost < cost): continue
-        sol, new_cost = two_opt_swap(G, sol)
-        if (new_cost < cost): continue
-        sol, new_cost = interroute_swap(G, sol)
-        if (new_cost < cost): continue
-        sol, new_cost = interroute_insertion(G, sol)
-        if (new_cost < cost): continue
-        
-        
-        break
+        improved = False
+        for operator in operators:
+            sol, new_cost = operator(G, sol)
+            if (new_cost < cost):
+                improved = True
+                break
+        if not improved:
+            break
 
     return sol, cost
 
@@ -521,6 +519,27 @@ def two_opt_swap(G, paths):
     cost = get_sol_cost(G, sol)
 
     return (sol, cost)
+
+
+# Default order in which the VND explores the operators: the cheap intra-route
+# neighbourhoods first, the expensive inter-route ones last.
+DEFAULT_VND_ORDER = [
+    intraroute_swap,
+    intraroute_insertion,
+    two_opt_swap,
+    interroute_swap,
+    interroute_insertion,
+]
+
+
+# Single pass over every operator, in order, without restarting from the first
+# one on improvement (unlike the VND). Baseline "fixed sequence" for tab:4.
+def all_local_searches(G, sol, operators=None):
+    if operators is None:
+        operators = DEFAULT_VND_ORDER
+    for operator in operators:
+        sol, cost = operator(G, sol)
+    return sol, get_sol_cost(G, sol)
 
 
 # Sum of nodes does not exceed the maximum capacity
