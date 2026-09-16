@@ -31,10 +31,10 @@ def check_parameters():
     )
 
     parser.add_argument(
-        "--max-neighborhood", 
+        "--max-shake",
         type = int,
-        default = 20,
-        help="Maximum neighborhood size to shake the solution and escape local optima (max 50)."
+        default = 50,
+        help = "Maximum shake intensity as a percentage of customers relocated (rho_max, max 50)."
     )
 
     parser.add_argument(
@@ -46,8 +46,8 @@ def check_parameters():
 
     args = parser.parse_args()
 
-    if args.max_neighborhood > 50:
-        parser.error("--max-neighborhood must be less than or equal to 50.")
+    if args.max_shake > 50:
+        parser.error("--max-shake must be less than or equal to 50.")
     
     return args
 
@@ -63,7 +63,7 @@ if args.output_file:
             print(f"Running instance: {file_name}")
             try:
                 result = subprocess.run(
-                    [python_path, program, "--instance", str(file_name), "--max-neighborhood", str(args.max_neighborhood), "--runs", str(args.runs)],
+                    [python_path, program, "--instance", str(file_name), "--max-shake", str(args.max_shake), "--runs", str(args.runs)],
                     text=True,
                     capture_output=True
                 )
@@ -81,7 +81,7 @@ else:
         print(f"Running instance: {file_name}")
         try:
             result = subprocess.run(
-                [python_path, program, "--instance", str(file_name), "--max-neighborhood", str(args.max_neighborhood), "--runs", str(args.runs)],
+                [python_path, program, "--instance", str(file_name), "--max-shake", str(args.max_shake), "--runs", str(args.runs)],
                 text=True,
                 capture_output=True
             )

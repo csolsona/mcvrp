@@ -25,7 +25,7 @@ Examples:
     python run_experiments.py --instances sample --runs 48 \
         --methods intra_swap,intra_insertion,two_opt,inter_swap,inter_insertion
 
-    # tab:5/tab:6 (GVNS k_max sweep + VND)
+    # tab:5/tab:6 (GVNS max_shake sweep + VND)
     python run_experiments.py --instances sample --runs 48 \
         --methods vnd,gvns:10,gvns:20,gvns:30,gvns:40,gvns:50
 
@@ -198,10 +198,10 @@ def parse_method(method_name):
 
 
 def resolve(method_name):
-    """Return (kind, fn, kwargs) for a method name. 'gvns:N' sets k_max=N."""
+    """Return (kind, fn, kwargs) for a method name. 'gvns:N' sets max_shake=N."""
     if method_name.startswith('gvns:'):
-        k_max = int(method_name.split(':', 1)[1])
-        return 'improve', mcvrp.gvns, {'k_max': k_max}
+        max_shake = int(method_name.split(':', 1)[1])
+        return 'improve', mcvrp.gvns, {'max_shake': max_shake}
     if method_name in CONSTRUCTIVE:
         return 'construct', CONSTRUCTIVE[method_name], {}
     if method_name in IMPROVEMENT:
@@ -321,7 +321,7 @@ def check_parameters():
              "random, nearest. Local searches: intra_swap, intra_insertion, "
              "two_opt, inter_swap, inter_insertion. Composite: all_ls, vnd, "
              "vnd_exhaustive_first. "
-             "Metaheuristic: gvns:K (K = k_max, e.g. gvns:50). "
+             "Metaheuristic: gvns:K (K = max_shake, e.g. gvns:50). "
              "Append '@SIZE' to any method to set its neighbourhood size for that "
              "run (e.g. inter_swap@30), overriding --neighbourhood.")
     parser.add_argument(

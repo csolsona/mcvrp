@@ -9,7 +9,7 @@ import numpy as np
 
 
 # Size of the per-customer neighbourhood used to restrict candidate moves in the local search operators.
-NEIGHBOURHOOD_SIZE = 20
+NEIGHBOURHOOD_SIZE = 50
 
 # Minimum delta for a move to count as an improvement, so float round-off on zero-cost moves isn't mistaken for a gain.
 IMPROVEMENT_TOLERANCE = 1e-9
@@ -73,12 +73,12 @@ def set_neighbourhood_size(G, size):
 
         
 
-def solve(G, k_max, num_threads):
+def solve(G, max_shake, num_threads):
 
     sol, cost = nearest_neighbour_alg(G)
 
     with ProcessPoolExecutor() as executor:
-        futures = [executor.submit(execute, G, sol, k_max) for _ in range(num_threads)]
+        futures = [executor.submit(execute, G, sol, max_shake) for _ in range(num_threads)]
 
     results = []
     for future in as_completed(futures):
@@ -96,27 +96,27 @@ def solve(G, k_max, num_threads):
     return results
 
 
-def execute(G, sol, k_max):
+def execute(G, sol, max_shake):
         start_time = time.perf_counter()
-        sol, cost = gvns(G, sol, k_max)
+        sol, cost = gvns(G, sol, max_shake)
         end_time = time.perf_counter()
         execute_time = end_time - start_time
         return (sol, cost, execute_time)
 
 
 # General Variable neighborhood search (GVNS)
-def gvns(G, sol, k_max):
-    k = 5
+def gvns(G, sol, max_shake):
+    shake_intensity = 5
     cost = get_sol_cost(G, sol)
-    while (k <= k_max):
-        shaken_sol = shake(G, sol, k)
+    while (shake_intensity <= max_shake):
+        shaken_sol = shake(G, sol, shake_intensity)
         new_sol, new_cost = vnd(G, shaken_sol)
         if (new_cost < cost):
-            k = 5
+            shake_intensity = 5
             sol = new_sol
             cost = new_cost
         else:
-            k += 5
+            shake_intensity += 5
 
     return sol, cost
 
@@ -147,7 +147,7 @@ def vnd(G, sol, operators=None):
     return sol, cost
 
 
-def shake(G, sol, k):
+def shake(G, sol, shake_intensity):
 
     def generate_indexes(sol, visited_nodes):
         indexes = []
@@ -161,7 +161,7 @@ def shake(G, sol, k):
                     indexes.append((i, j))
         return indexes
 
-    nodes_to_change = math.ceil(len(generate_indexes(sol, [])) * (k / 100))
+    nodes_to_change = math.ceil(len(generate_indexes(sol, [])) * (shake_intensity / 100))
     
     def loop():
         # Shallow-copy each route: the elements are ints, so no deepcopy needed.
@@ -581,13 +581,13 @@ def get_neighbour_cost(dist, path, i):
 
 
 
-def print_results(results, num_threads, k_max):
+def print_results(results, num_threads, max_shake):
 
     best_sol, best_cost, best_ex_time = min(results, key=lambda x: x[1])
 
     print()
     print('Runs:', num_threads)
-    print('Max neighborhood:', k_max)
+    print('Max shake:', max_shake)
     print()
 
     print('Best sol:', best_sol)
@@ -616,10 +616,10 @@ def check_parameters():
     )
 
     parser.add_argument(
-        "--max-neighborhood", 
+        "--max-shake",
         type = int,
-        default = 20,
-        help = "Maximum neighborhood size to shake the solution and escape local optima (max 50)."
+        default = 50,
+        help = "Maximum shake intensity as a percentage of customers relocated (rho_max, max 50)."
     )
 
     parser.add_argument(
@@ -630,7 +630,7 @@ def check_parameters():
     )
 
     parser.add_argument(
-        "--runs", 
+        "--runs",
         type = int,
         default = 1,
         help = "Number of times the program will be executed for each instance."
@@ -638,9 +638,9 @@ def check_parameters():
 
     args = parser.parse_args()
 
-    if args.max_neighborhood > 50:
-        parser.error("--max-neighborhood must be less than or equal to 50.")
-    
+    if args.max_shake > 50:
+        parser.error("--max-shake must be less than or equal to 50.")
+
     return args
 
 if __name__ == '__main__':
@@ -651,8 +651,8 @@ if __name__ == '__main__':
     set_neighbourhood_size(G, args.neighbourhood_size)
 
     runs = int(args.runs)
-    k_max = int(args.max_neighborhood)
-    
-    results = solve(G, k_max, runs)
+    max_shake = int(args.max_shake)
 
-    print_results(results, runs, k_max)
+    results = solve(G, max_shake, runs)
+
+    print_results(results, runs, max_shake)

@@ -26,13 +26,15 @@ To run the solver on a single instance, you can use the `mcvrp.py` script direct
 
 - `--instance`: Path to the instance file (from the instaces directory).
 
-- `--max-neighborhood`: Maximum neighborhood size for shaking the solution (default is 20, max is 50).
+- `--max-shake`: Maximum shake intensity, as a percentage of customers relocated (default is 50, max is 50).
+
+- `--neighbourhood-size`: Number of nearest customers each local-search operator considers as move candidates (default is 50).
 
 - `--runs`: Number of times to run the solver for the instance (default is 1).
 
 Example command:
 ```bash
-python mcvrp.py --instance Abdulkader/vrpnc1a.txt --max-neighborhood 20 --runs 12
+python mcvrp.py --instance Abdulkader/vrpnc1a.txt --max-shake 50 --neighbourhood-size 50 --runs 12
 ```
 
 #### Running Multiple Instances
@@ -41,13 +43,13 @@ To run the solver on multiple instances, use the `run_instances.py` script. This
 
 - `--output-file`: Path to the output file where results will be saved (optional).
 
-- `--max-neighborhood`: Maximum neighborhood size for shaking the solution (default is 20, max is 50).
+- `--max-shake`: Maximum shake intensity, as a percentage of customers relocated (default is 50, max is 50).
 
 - `--runs`: Number of times to run the solver for each instance (default is 1).
 
 Example command:
 ```bash
-python run_instances.py --output-file results.txt --max-neighborhood 20 --runs 12
+python run_instances.py --output-file results.txt --max-shake 50 --runs 12
 ```
 
 If no output file is specified, the results will be printed to the console.
