@@ -84,13 +84,10 @@ def solve(G, max_shake, num_threads):
     for future in as_completed(futures):
         results.append(future.result())
 
-    all_sol = list(map(lambda x: x[0], results))
-
-    valid_sol = all([is_path_feasible(G, path) for sol in all_sol for path in sol])
-    if (not valid_sol):
+    if not all(is_solution_valid(G, sol) for sol, _, _ in results):
         print('Error. Solution not valid')
         exit(1)
-    
+
     print('Valid solution')
 
     return results
@@ -536,13 +533,23 @@ DEFAULT_VND_ORDER = [
 
 
 # Single pass over every operator, in order, without restarting from the first
-# one on improvement (unlike the VND). Baseline "fixed sequence" for tab:4.
+# one on improvement (unlike the VND). Baseline "fixed sequence" to compare
+# against the VND.
 def all_local_searches(G, sol, operators=None):
     if operators is None:
         operators = DEFAULT_VND_ORDER
     for operator in operators:
         sol, cost = operator(G, sol)
     return sol, get_sol_cost(G, sol)
+
+
+# Every customer is served exactly once and every route is feasible.
+def is_solution_valid(G, sol):
+    served = sorted(c for path in sol for c in path if c != 0)
+    return (
+        served == list(range(1, G.number_of_nodes()))
+        and all(is_path_feasible(G, path) for path in sol)
+    )
 
 
 # Sum of nodes does not exceed the maximum capacity

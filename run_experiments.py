@@ -18,18 +18,18 @@ The initial solution for the improvement methods (local search, VND, GVNS) is
 always nearest-neighbour, exactly as in mcvrp.solve().
 
 Examples:
-    # tab:1 (constructive comparison)
+    # Constructive comparison
     python run_experiments.py --methods random,nearest --instances sample --runs 48
 
-    # tab:2 (local searches separately)
+    # Local searches separately
     python run_experiments.py --instances sample --runs 48 \
         --methods intra_swap,intra_insertion,two_opt,inter_swap,inter_insertion
 
-    # tab:5/tab:6 (GVNS max_shake sweep + VND)
+    # GVNS max_shake sweep + VND
     python run_experiments.py --instances sample --runs 48 \
         --methods vnd,gvns:10,gvns:20,gvns:30,gvns:40,gvns:50
 
-    # tab:7/tab:8 (full instance set)
+    # Full instance set
     python run_experiments.py --instances all --runs 48 --methods all_ls,vnd,gvns:50
 """
 
@@ -42,9 +42,7 @@ from concurrent.futures import ProcessPoolExecutor
 import mcvrp
 
 
-# 8-instance sample used in tab:1-6. Chosen to cover the size range, both
-# constraint regimes (capacity only vs +route-time/drop), uniform vs clustered
-# layouts and both compartment-balance variants (a/b). Numeric order.
+# 8-instance sample for the preliminary experiments.
 SAMPLE = [
     'Abdulkader/vrpnc1a.txt',
     'Abdulkader/vrpnc3b.txt',
@@ -56,7 +54,7 @@ SAMPLE = [
     'Abdulkader/vrpnc14b.txt',
 ]
 
-# All 28 reference instances (tab:7-8).
+# All 28 reference instances.
 ALL = [
     'Abdulkader/vrpnc1a.txt', 'Abdulkader/vrpnc1b.txt',
     'Abdulkader/vrpnc2a.txt', 'Abdulkader/vrpnc2b.txt',
@@ -246,12 +244,6 @@ def run_one(task):
 
 # --- Validation & reporting -------------------------------------------------
 
-def is_solution_valid(G, sol):
-    expected = set(G.nodes) - {0}
-    served = {n for path in sol for n in path if n != 0}
-    return served == expected and all(mcvrp.is_path_feasible(G, p) for p in sol)
-
-
 def format_time(t):
     """Time with 3 decimals, in seconds or milliseconds as needed.
 
@@ -291,7 +283,7 @@ def build_report(instances, methods, runs, workers, neighbourhood):
                            for _ in range(runs)]
                 results = [f.result() for f in futures]
 
-                if not all(is_solution_valid(G, sol) for _, _, sol in results):
+                if not all(mcvrp.is_solution_valid(G, sol) for _, _, sol in results):
                     lines.append(f"  {method_name.ljust(width)} [INVALID SOLUTION]")
                     print(f"  WARNING: {method_name} produced an invalid solution "
                           f"on {file_name}")
