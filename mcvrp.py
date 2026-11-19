@@ -213,17 +213,11 @@ def can_satisfy(capacity, demand):
 def random_alg(G):
     dist = G.graph['dist']
 
-    def can_append(path, prev_node, node, capacity, time_limit):
-        path.append(node)
-        path.append(0)
-        capacity[0] -= G.nodes[node]['demand'][0]
-        capacity[1] -= G.nodes[node]['demand'][1]
-        time_limit -= dist[prev_node][node]
-        time_limit -= dist[node][0]
-        time_limit -= G.graph['drop_time']
-        path.pop()
-        path.pop()
-        return (capacity[0] >= 0) and (capacity[1] >= 0) and (time_limit >= 0)
+    def can_append(prev_node, node, capacity, time_limit):
+        return (
+            can_satisfy(capacity, G.nodes[node]['demand'])
+            and dist[prev_node][node] + G.graph['drop_time'] + dist[node][0] <= time_limit
+        )
 
 
     sol = []
@@ -236,7 +230,7 @@ def random_alg(G):
     path = [start_node]
     while nodes:
         node = nodes.pop()
-        if can_append(path, prev_node, node, capacity, time_limit):
+        if can_append(prev_node, node, capacity, time_limit):
             path.append(node)
             capacity[0] -= G.nodes[node]['demand'][0]
             capacity[1] -= G.nodes[node]['demand'][1]
